@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+
+build/
+dist/
+*.spec
+
+*preview*.png
+_*.py
+_*.txt
