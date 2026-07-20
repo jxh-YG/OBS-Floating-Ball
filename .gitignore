@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 .pytest_cache/
 *.py[cod]
 *.egg-info/
@@ -8,5 +8,6 @@ dist/
 *.spec
 
 *preview*.png
-_*.py
-_*.txt
+/_*.py
+/_*.txt
+build_log.txt

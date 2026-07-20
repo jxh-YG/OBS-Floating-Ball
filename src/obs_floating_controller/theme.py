@@ -71,7 +71,7 @@ RADIUS_CONTROL = 8
 RADIUS_BUTTON = 10
 RADIUS_CARD = 12
 RADIUS_PILL = 22
-RADIUS_BUBBLE = 27
+RADIUS_BUBBLE = 31
 RADIUS_MENU = 12
 RADIUS_MENU_ITEM = 8
 
@@ -84,18 +84,18 @@ SPACE_XL = 20
 SPACE_XXL = 24
 
 # Component sizes from the supplied HTML reference, scaled to one third.
-FLOAT_HEIGHT = 43
-FLOAT_BUBBLE = 43
-FLOAT_STRIP_HEIGHT = 30
-FLOAT_STRIP_LEFT = 25
-FLOAT_STRIP_WIDTH = 113
-FLOAT_EXPANDED_WIDTH = 138
-FLOAT_COLLAPSED_WIDTH = 43
-BUTTON_HIT = 17
+FLOAT_HEIGHT = 49
+FLOAT_BUBBLE = 49
+FLOAT_STRIP_HEIGHT = 34
+FLOAT_STRIP_LEFT = 29
+FLOAT_STRIP_WIDTH = 128
+FLOAT_EXPANDED_WIDTH = 157
+FLOAT_COLLAPSED_WIDTH = 49
+BUTTON_HIT = 20
 CONTROL_DIVIDER_WIDTH = 1
-CONTROL_DIVIDER_HEIGHT = 10
-STATUS_DOT_SIZE = 3
-STATUS_DOT_MARGIN = 4
+CONTROL_DIVIDER_HEIGHT = 11
+STATUS_DOT_SIZE = 4
+STATUS_DOT_MARGIN = 5
 SETTINGS_BUTTON_W = 132
 SETTINGS_BUTTON_H = 42
 SETTINGS_WIDTH = 440
@@ -206,25 +206,87 @@ def palette(dark: bool | None = None) -> Palette:
     )
 
 
-def settings_stylesheet(dark: bool | None = None) -> str:
-    """Grouped-list settings dialog, Apple Settings–inspired."""
+def dialog_stylesheet(dark: bool | None = None) -> str:
+    """Shared Apple-style dialog chrome (settings, prompts, alerts)."""
     p = palette(dark)
     return f"""
-        QDialog#settingsDialog {{
+        QDialog#appleDialog, QDialog#settingsDialog {{
             background: {p.fill_secondary};
             font-family: '{FONT_FAMILY_PRIMARY}';
             color: {p.label_primary};
         }}
-        QLabel#settingsTitle {{
+        QLabel#dialogTitle, QLabel#settingsTitle {{
             color: {p.label_primary};
-            font-size: 28px;
+            font-size: 22px;
             font-weight: 700;
+            letter-spacing: -0.3px;
+        }}
+        QLabel#settingsTitle {{
+            font-size: 28px;
             letter-spacing: -0.4px;
         }}
-        QLabel#settingsIntro {{
+        QLabel#dialogPrompt, QLabel#settingsIntro {{
             color: {p.label_secondary};
             font-size: 13px;
         }}
+        QWidget#dialogFieldWrap {{
+            background: {p.fill_primary};
+            border: 1px solid {p.separator_light};
+            border-radius: {RADIUS_CONTROL}px;
+        }}
+        QLineEdit#dialogField {{
+            min-height: 36px;
+            max-height: 36px;
+            padding: 0 4px;
+            background: transparent;
+            border: 0;
+            color: {p.label_primary};
+            font-size: 15px;
+            selection-background-color: {p.blue_soft};
+        }}
+        QPushButton#saveButton {{
+            min-height: {SETTINGS_BUTTON_H}px;
+            max-height: {SETTINGS_BUTTON_H}px;
+            padding: 0 18px;
+            background: {p.blue};
+            color: #FFFFFF;
+            border: 0;
+            border-radius: {RADIUS_BUTTON}px;
+            font-size: 15px;
+            font-weight: 600;
+        }}
+        QPushButton#saveButton:hover {{
+            background: {p.blue_hover};
+        }}
+        QPushButton#saveButton:pressed {{
+            background: {p.blue_pressed};
+        }}
+        QPushButton#cancelButton {{
+            min-height: {SETTINGS_BUTTON_H}px;
+            max-height: {SETTINGS_BUTTON_H}px;
+            padding: 0 18px;
+            background: {p.fill_primary};
+            color: {p.label_primary};
+            border: 1px solid {p.separator};
+            border-radius: {RADIUS_BUTTON}px;
+            font-size: 15px;
+            font-weight: 500;
+        }}
+        QPushButton#cancelButton:hover {{
+            background: {p.fill_tertiary};
+        }}
+        QPushButton#cancelButton:pressed {{
+            background: {p.separator_light};
+        }}
+    """.strip()
+
+
+def settings_stylesheet(dark: bool | None = None) -> str:
+    """Grouped-list settings dialog, Apple Settings–inspired."""
+    p = palette(dark)
+    base = dialog_stylesheet(dark)
+    return base + f"""
+
         QFrame#settingsGroup {{
             background: {p.fill_primary};
             border: 1px solid {p.separator_light};
@@ -421,26 +483,31 @@ def floating_strip_stylesheet(dark: bool | None = None) -> str:
 
 def floating_menu_stylesheet(dark: bool | None = None) -> str:
     p = palette(dark)
+    # Background is painted by RoundedMenu so corners clip cleanly.
     return f"""
         QMenu#floatingContextMenu {{
-            background: {p.fill_primary};
-            border: 1px solid {p.separator};
-            border-radius: {RADIUS_MENU}px;
+            background: transparent;
+            border: none;
             padding: 6px;
         }}
         QMenu#floatingContextMenu::item {{
             padding: 8px 28px 8px 12px;
+            margin: 1px 4px;
             border-radius: {RADIUS_MENU_ITEM}px;
             color: {p.label_primary};
             font-size: 13px;
+            background: transparent;
         }}
         QMenu#floatingContextMenu::item:selected {{
             background: {p.blue_soft};
             color: {p.blue_text};
         }}
+        QMenu#floatingContextMenu::item:disabled {{
+            color: {p.label_tertiary};
+        }}
         QMenu#floatingContextMenu::separator {{
             height: 1px;
             background: {p.separator_light};
-            margin: 4px 8px;
+            margin: 4px 10px;
         }}
     """.strip()

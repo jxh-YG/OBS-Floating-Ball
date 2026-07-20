@@ -7,12 +7,15 @@ Ball color reflects connection / recording state.
 
 from __future__ import annotations
 
+import math
+import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QRegion,
     QFont,
     QLinearGradient,
     QMouseEvent,
@@ -40,6 +43,7 @@ class TimerBubble(QWidget):
         self._recording = False
         self._paused = False
         self._finished = False
+        self._pulse = 0.0
 
     def set_display(
         self,
@@ -49,12 +53,14 @@ class TimerBubble(QWidget):
         recording: bool = False,
         paused: bool = False,
         finished: bool = False,
+        pulse: float = 0.0,
     ) -> None:
         self._text = text
         self._connected = connected
         self._recording = recording
         self._paused = paused
         self._finished = finished
+        self._pulse = pulse
         self.update()
 
     def _core_colors(self) -> tuple[QColor, QColor, QColor, QColor]:
@@ -126,6 +132,13 @@ class TimerBubble(QWidget):
         painter.setPen(QPen(rim, max(0.5, 0.8 * scale)))
         painter.setBrush(body)
         painter.drawEllipse(core)
+
+        if self._recording and self._pulse > 0:
+            ring_alpha = int(40 + 90 * self._pulse)
+            painter.setPen(QPen(QColor(255, 80, 80, ring_alpha), max(1.0, 2.0 * scale)))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            grow = 2.0 * scale * self._pulse
+            painter.drawEllipse(core.adjusted(-grow, -grow, grow, grow))
 
         # Soft edge vignette for depth
         edge = QRadialGradient(cx, cy, core.width() * 0.52)
@@ -362,15 +375,65 @@ class AppleActionButton(QToolButton):
             painter.restore()
 
 
+class RoundedMenu(QMenu):
+    """Context menu with clipped outer rounded corners (Apple-like panel)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("floatingContextMenu")
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet(theme.floating_menu_stylesheet())
+
+    def _apply_round_mask(self) -> None:
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        radius = float(theme.RADIUS_MENU)
+        path = QPainterPath()
+        # Inset slightly so the 1px border stays inside the mask.
+        path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)
+        self._apply_round_mask()
+
+    def showEvent(self, event: object) -> None:
+        super().showEvent(event)
+        self._apply_round_mask()
+
+    def paintEvent(self, event: object) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = float(theme.RADIUS_MENU)
+        colors = theme.palette()
+        painter.setPen(QPen(QColor(colors.separator), 1.0))
+        painter.setBrush(QColor(colors.fill_primary))
+        painter.drawRoundedRect(rect, radius, radius)
+        painter.end()
+        # Draw items without the default rectangular panel fill.
+        opt = event  # keep signature; use QStyle painting via base with no panel
+        # Manually invoke item rendering: QMenu.paintEvent draws panel+items.
+        # Temporarily rely on stylesheet transparent panel + our fill above.
+        super().paintEvent(event)
+
+
 class FloatingControlBar(QWidget):
     start_requested = Signal()
     pause_requested = Signal()
     resume_requested = Signal()
     stop_requested = Signal()
-    annotation_requested = Signal()
     rename_requested = Signal()
+    open_folder_requested = Signal()
+    open_recent_requested = Signal(str)
     close_requested = Signal()
     hide_requested = Signal()
+    position_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__(None)
@@ -390,6 +453,8 @@ class FloatingControlBar(QWidget):
         self._bubble_click_pending = False
         self._expanded = False
         self._last_recording_output_path: str | None = None
+        self._recent_recordings: list[str] = []
+        self._pulse_phase = 0.0
         self._context_menu: QMenu | None = None
         self._record_status = RecordStatus(RecordingState.DISCONNECTED, 0)
         self._status_provider: Callable[[], RecordStatus] | None = None
@@ -397,7 +462,6 @@ class FloatingControlBar(QWidget):
         self._display_timer = QTimer(self)
         self._display_timer.setInterval(250)
         self._display_timer.timeout.connect(self._refresh_timer)
-        self._display_timer.start()
 
     def _build_ui(self) -> None:
         self.setFixedSize(theme.FLOAT_COLLAPSED_WIDTH, theme.FLOAT_HEIGHT)
@@ -446,7 +510,6 @@ class FloatingControlBar(QWidget):
             widget.installEventFilter(self)
         self._strip.setCursor(Qt.CursorShape.SizeAllCursor)
         self._bubble.raise_()
-        self._apply_window_mask()
         self._set_actions_enabled()
 
     @property
@@ -463,7 +526,6 @@ class FloatingControlBar(QWidget):
             theme.FLOAT_EXPANDED_WIDTH if expanded else theme.FLOAT_COLLAPSED_WIDTH,
             theme.FLOAT_HEIGHT,
         )
-        self._apply_window_mask()
         self._bubble.setCursor(
             Qt.CursorShape.PointingHandCursor if not expanded else Qt.CursorShape.SizeAllCursor
         )
@@ -471,8 +533,6 @@ class FloatingControlBar(QWidget):
     def toggle_collapsed(self) -> None:
         self.set_collapsed(self._expanded)
 
-    def _apply_window_mask(self) -> None:
-        self.clearMask()
 
     def _control_button(self, kind: str, text_key: str, object_name: str) -> AppleActionButton:
         button = AppleActionButton(kind, self._strip)
@@ -509,14 +569,18 @@ class FloatingControlBar(QWidget):
         self._connected = connected
         self._connection_message = message
         self._bubble.setToolTip(message)
-        if not connected:
-            self._refresh_timer()
+        self._refresh_timer()
         self._set_actions_enabled()
+        self._sync_display_timer()
 
     def set_record_status(self, status: RecordStatus) -> None:
         self._record_status = status
         self._refresh_timer()
         self._set_actions_enabled()
+        self._sync_display_timer()
+
+    def set_recent_recordings(self, paths: list[str] | tuple[str, ...]) -> None:
+        self._recent_recordings = list(paths)
 
     def set_recording_output_path(self, output_path: str | None) -> None:
         self._last_recording_output_path = output_path
@@ -545,12 +609,24 @@ class FloatingControlBar(QWidget):
                 finished=self._last_recording_output_path is not None,
             )
         else:
+            pulse = 0.0
+            if recording:
+                pulse = 0.5 + 0.5 * math.sin(time.monotonic() * 6.0)
             self._bubble.set_display(
                 format_elapsed(self._record_status.elapsed_seconds),
                 True,
                 recording=recording,
                 paused=paused,
+                pulse=pulse,
             )
+
+    def _sync_display_timer(self) -> None:
+        should_run = self._connected and self._record_status.state is RecordingState.RECORDING
+        if should_run:
+            if not self._display_timer.isActive():
+                self._display_timer.start()
+        elif self._display_timer.isActive():
+            self._display_timer.stop()
 
     def _set_actions_enabled(self) -> None:
         state = self._record_status.state
@@ -566,7 +642,7 @@ class FloatingControlBar(QWidget):
             self._primary.set_kind("play")
             self._primary.setToolTip(tr("resume_recording", self._language))
         elif recording:
-            self._primary.set_kind("play")
+            self._primary.set_kind("pause")
             self._primary.setToolTip(tr("pause_recording", self._language))
         else:
             self._primary.set_kind("play")
@@ -668,20 +744,38 @@ class FloatingControlBar(QWidget):
         self._bubble_click_pending = bubble_click_pending
 
     def _end_drag(self) -> None:
+        moved = self._drag_started
         self._drag_offset = None
         self._drag_press_position = None
         self._drag_started = False
         self._bubble_click_pending = False
+        if moved:
+            self.position_changed.emit()
 
     def _show_context_menu(self, position: QPoint) -> None:
-        menu = QMenu(self)
-        menu.setObjectName("floatingContextMenu")
-        menu.setStyleSheet(theme.floating_menu_stylesheet())
+        menu = RoundedMenu(self)
+        open_folder_action = QAction(tr("open_recording_folder", self._language), menu)
+        open_folder_action.setEnabled(self._last_recording_output_path is not None)
+        open_folder_action.triggered.connect(self.open_folder_requested.emit)
+        menu.addAction(open_folder_action)
+        menu.addSeparator()
         hide_action = QAction(tr("hide_floating_ball", self._language), menu)
         hide_action.triggered.connect(self.hide_requested.emit)
         menu.addAction(hide_action)
         self._context_menu = menu
-        menu.popup(position)
+        # Open below the floating control so the menu does not cover the ball.
+        menu.adjustSize()
+        gap = 12
+        below = self.mapToGlobal(QPoint(0, self.height() + gap))
+        # Keep horizontal position near the click, but never above the control bottom.
+        x = position.x()
+        y = max(position.y() + gap, below.y())
+        # Prefer aligning under the ball/control left edge when click is on-widget.
+        bar_rect = self.frameGeometry()
+        if bar_rect.contains(position):
+            x = bar_rect.left()
+            y = bar_rect.bottom() + gap
+        menu.popup(QPoint(x, y))
 
     def closeEvent(self, event: object) -> None:
         if self._allow_close:

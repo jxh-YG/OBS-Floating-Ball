@@ -62,6 +62,7 @@ class ObsWebSocketClient(QObject):
         self._last_error = tr("not_connected", self._language)
         self._request_ids = count(1)
         self._pending: dict[str, str] = {}
+        self._last_emitted_output_path: str | None = None
         self._retry_timer = QTimer(self)
         self._retry_timer.setSingleShot(True)
         self._retry_timer.timeout.connect(self._open)
@@ -109,6 +110,9 @@ class ObsWebSocketClient(QObject):
 
     def stop_record(self) -> None:
         self._send_request("StopRecord")
+
+    def refresh_status(self) -> None:
+        self._send_request("GetRecordStatus")
 
     def _open(self) -> None:
         if not self._should_retry:
@@ -225,13 +229,21 @@ class ObsWebSocketClient(QObject):
             output_duration_ms=data.get("outputDuration"),
         )
         self.record_status_changed.emit(status)
-        if not status.is_active:
+        if status.is_active:
+            # Next stop should be allowed to publish a new output path.
+            self._last_emitted_output_path = None
+        else:
             self._publish_recording_output(data)
 
     def _publish_recording_output(self, data: dict[str, Any]) -> None:
         output_path = data.get("outputPath")
-        if isinstance(output_path, str) and output_path:
-            self.recording_output_ready.emit(output_path)
+        if not isinstance(output_path, str) or not output_path:
+            return
+        # StopRecord reply and RecordStateChanged both carry outputPath; emit once.
+        if output_path == self._last_emitted_output_path:
+            return
+        self._last_emitted_output_path = output_path
+        self.recording_output_ready.emit(output_path)
 
     def _send_request(self, request_type: str) -> None:
         if not self._identified:

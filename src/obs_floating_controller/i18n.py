@@ -1,4 +1,4 @@
-"""Small runtime translation catalog for the two supported interface languages."""
+﻿"""Small runtime translation catalog for the two supported interface languages."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ SUPPORTED_LANGUAGES = (CHINESE, ENGLISH)
 
 _TEXT = {
     "app_name": {CHINESE: "OBS Floating Ball", ENGLISH: "OBS Floating Ball"},
+    "already_running": {CHINESE: "程序已在运行", ENGLISH: "Already running"},
+    "already_running_detail": {CHINESE: "OBS Floating Ball 已在运行，请勿重复启动。", ENGLISH: "OBS Floating Ball is already running."},
     "not_connected": {CHINESE: "未连接 OBS", ENGLISH: "OBS not connected"},
     "connecting": {CHINESE: "正在连接 OBS…", ENGLISH: "Connecting to OBS…"},
     "connected": {CHINESE: "已连接 OBS", ENGLISH: "Connected to OBS"},
@@ -29,17 +31,10 @@ _TEXT = {
     "pause_recording": {CHINESE: "暂停录制", ENGLISH: "Pause recording"},
     "resume_recording": {CHINESE: "继续录制", ENGLISH: "Resume recording"},
     "stop_recording": {CHINESE: "停止录制", ENGLISH: "Stop recording"},
-    "annotate": {CHINESE: "标注", ENGLISH: "Annotate"},
-    "brush": {CHINESE: "画笔", ENGLISH: "Brush"},
-    "eraser": {CHINESE: "橡皮擦", ENGLISH: "Eraser"},
-    "select_color": {CHINESE: "选择颜色", ENGLISH: "Choose color"},
-    "custom_color": {CHINESE: "自定义颜色", ENGLISH: "Custom color"},
-    "choose_color_title": {CHINESE: "选择标注颜色", ENGLISH: "Choose annotation color"},
-    "width": {CHINESE: "粗细", ENGLISH: "Width"},
-    "brush_width": {CHINESE: "画笔粗细", ENGLISH: "Brush width"},
-    "undo": {CHINESE: "撤销", ENGLISH: "Undo"},
-    "clear": {CHINESE: "清屏", ENGLISH: "Clear"},
-    "exit_annotation": {CHINESE: "退出标注", ENGLISH: "Exit annotation"},
+    "open_recording_folder": {CHINESE: "打开录制文件夹", ENGLISH: "Open recording folder"},
+    "recent_recordings": {CHINESE: "最近录制", ENGLISH: "Recent recordings"},
+    "recent_empty": {CHINESE: "暂无最近录制", ENGLISH: "No recent recordings"},
+    "open_file": {CHINESE: "打开文件", ENGLISH: "Open file"},
     "rename_recording": {CHINESE: "重命名视频", ENGLISH: "Rename video"},
     "rename_video_title": {CHINESE: "重命名视频", ENGLISH: "Rename video"},
     "rename_video_prompt": {CHINESE: "新文件名", ENGLISH: "New file name"},
@@ -48,32 +43,46 @@ _TEXT = {
     "rename_video_invalid": {CHINESE: "文件名不能为空，且不能包含以下字符：\\ / : * ? \" < > |", ENGLISH: "The name cannot be blank or contain \\ / : * ? \" < > |"},
     "rename_video_exists": {CHINESE: "已存在同名文件", ENGLISH: "A file with that name already exists"},
     "rename_video_failed": {CHINESE: "无法重命名视频：{error}", ENGLISH: "Could not rename the video: {error}"},
+    "rename_video_busy": {CHINESE: "文件仍在写入，稍后重试…", ENGLISH: "File is still being written; retrying…"},
     "hide_floating_ball": {CHINESE: "隐藏悬浮球", ENGLISH: "Hide floating ball"},
     "show_hide": {CHINESE: "显示/隐藏", ENGLISH: "Show/Hide"},
     "connection_settings": {CHINESE: "连接设置", ENGLISH: "Connection settings"},
     "quit": {CHINESE: "退出", ENGLISH: "Quit"},
     "settings_title": {CHINESE: "OBS 连接设置", ENGLISH: "OBS Connection Settings"},
     "settings_heading": {CHINESE: "连接 OBS", ENGLISH: "Connect OBS"},
-    "settings_intro": {CHINESE: "连接本机 OBS WebSocket 服务", ENGLISH: "Connect to the local OBS WebSocket server"},
+    "settings_intro": {CHINESE: "连接本机 OBS WebSocket，并配置快捷键与录制偏好", ENGLISH: "Connect to the local OBS WebSocket server and configure shortcuts"},
     "group_connection": {CHINESE: "连接", ENGLISH: "CONNECTION"},
     "group_preferences": {CHINESE: "偏好设置", ENGLISH: "PREFERENCES"},
+    "group_hotkeys": {CHINESE: "快捷键", ENGLISH: "HOTKEYS"},
     "server": {CHINESE: "服务器", ENGLISH: "Server"},
+    "host": {CHINESE: "地址", ENGLISH: "Host"},
+    "port": {CHINESE: "端口", ENGLISH: "Port"},
     "password": {CHINESE: "密码", ENGLISH: "Password"},
-    "password_placeholder": {CHINESE: "OBS WebSocket 密码", ENGLISH: "OBS WebSocket password"},
+    "password_placeholder": {CHINESE: "OBS WebSocket 密码（可留空）", ENGLISH: "OBS WebSocket password (optional)"},
     "language": {CHINESE: "语言", ENGLISH: "Language"},
+    "hotkey": {CHINESE: "显示/隐藏", ENGLISH: "Show/Hide"},
+    "hotkey_start": {CHINESE: "开始录制", ENGLISH: "Start recording"},
+    "hotkey_pause": {CHINESE: "暂停/继续", ENGLISH: "Pause/Resume"},
+    "hotkey_stop": {CHINESE: "停止录制", ENGLISH: "Stop recording"},
+    "hotkey_hint": {CHINESE: "点击后按下组合键", ENGLISH: "Click then press a key combination"},
+    "hotkey_restore": {CHINESE: "恢复默认快捷键", ENGLISH: "Restore default shortcuts"},
+    "autostart": {CHINESE: "开机启动", ENGLISH: "Start with Windows"},
+    "autostart_enable": {CHINESE: "登录时启动", ENGLISH: "Launch at sign-in"},
+    "auto_rename": {CHINESE: "停止后重命名", ENGLISH: "Rename after stop"},
+    "auto_rename_enable": {CHINESE: "停止录制后自动弹出重命名", ENGLISH: "Prompt to rename after stopping"},
+    "auto_hide_recording": {CHINESE: "录制时隐藏", ENGLISH: "Hide while recording"},
+    "auto_hide_recording_enable": {CHINESE: "开始录制后自动隐藏悬浮球", ENGLISH: "Hide the floating ball while recording"},
     "save_connect": {CHINESE: "保存并连接", ENGLISH: "Save and connect"},
     "cancel": {CHINESE: "取消", ENGLISH: "Cancel"},
-    "capture_checking": {CHINESE: "悬浮控制条不会进入显示器采集；首次打开标注工具面板时将验证其采集排除能力。", ENGLISH: "The floating control bar stays out of display capture. Annotation-tool exclusion will be checked when it opens."},
-    "capture_ready": {CHINESE: "悬浮控制条和标注工具面板都不会进入采集画面。", ENGLISH: "The floating control bar and annotation tools stay out of display capture."},
+    "ok": {CHINESE: "好", ENGLISH: "OK"},
+    "capture_bar_in_display": {CHINESE: "悬浮控制条为透明圆角窗口，会出现在“显示器采集”中；可开启“录制时隐藏”或用快捷键临时隐藏。", ENGLISH: "The translucent floating control bar appears in display capture; enable hide-while-recording or use the shortcut."},
     "capture_unavailable": {CHINESE: "标注工具面板的采集排除不可用：{reason}", ENGLISH: "Annotation-tool exclusion unavailable: {reason}"},
-    "capture_unavailable_title": {CHINESE: "标注工具面板可能出现在采集画面中", ENGLISH: "Annotation tools may appear in capture"},
     "floating_bar_capture_unavailable": {CHINESE: "悬浮控制条的采集排除不可用：{reason}", ENGLISH: "Floating control bar exclusion unavailable: {reason}"},
     "floating_bar_capture_unavailable_title": {CHINESE: "悬浮控制条可能出现在采集画面中", ENGLISH: "Floating control bar may appear in capture"},
     "shortcut_unavailable": {CHINESE: "快捷键不可用", ENGLISH: "Shortcut unavailable"},
     "obs_action_failed": {CHINESE: "OBS 操作失败", ENGLISH: "OBS action failed"},
     "password_save_failed": {CHINESE: "无法保存密码", ENGLISH: "Unable to save password"},
-    "annotation_unavailable": {CHINESE: "无法进入标注", ENGLISH: "Cannot start annotation"},
-    "no_screen": {CHINESE: "未找到可用显示器", ENGLISH: "No available display was found"},
+    "invalid_port": {CHINESE: "端口必须是 1–65535 的整数", ENGLISH: "Port must be an integer from 1 to 65535"},
 }
 
 
@@ -82,4 +91,10 @@ def normalize_language(language: str | None) -> str:
 
 
 def tr(key: str, language: str = CHINESE, **values: object) -> str:
-    return _TEXT[key][normalize_language(language)].format(**values)
+    entry = _TEXT.get(key)
+    if entry is None:
+        return key
+    template = entry.get(normalize_language(language), entry[CHINESE])
+    if values:
+        return template.format(**values)
+    return template

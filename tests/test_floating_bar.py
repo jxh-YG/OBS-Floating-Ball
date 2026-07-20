@@ -9,7 +9,6 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
 import obs_floating_controller.platform_windows as platform_windows
-from obs_floating_controller.annotation import AnnotationCanvas, AnnotationToolPanel
 from obs_floating_controller.floating_bar import FloatingControlBar
 from obs_floating_controller import theme
 from obs_floating_controller.i18n import tr
@@ -38,12 +37,16 @@ def test_controls_follow_the_recording_state(qt_app: QApplication) -> None:
 
     bar.set_record_status(RecordStatus(RecordingState.RECORDING, 10))
     assert bar._primary.isEnabled()
+    assert bar._primary._kind == "pause"
     assert bar._stop.isEnabled()
     assert not bar._secondary.isEnabled()
+    assert bar._display_timer.isActive()
 
     bar.set_record_status(RecordStatus(RecordingState.PAUSED, 10))
+    assert bar._primary._kind == "play"
     assert "继续" in bar._primary.toolTip()
     assert not bar._secondary.isEnabled()
+    assert not bar._display_timer.isActive()
 
     bar.set_record_status(RecordStatus(RecordingState.IDLE, 0))
     bar.set_recording_output_path("C:/recordings/demo.mkv")
@@ -73,9 +76,10 @@ def test_timer_bubble_uses_distinct_colors_for_connection_and_recording_states(
 
 def test_floating_bar_matches_the_reference_at_one_third_scale(qt_app: QApplication) -> None:
     bar = FloatingControlBar()
-    assert (theme.FLOAT_BUBBLE, theme.FLOAT_STRIP_HEIGHT, theme.BUTTON_HIT) == (43, 30, 17)
-    assert (bar.width(), bar.height()) == (43, 43)
-    assert (bar._primary.width(), bar._primary.height()) == (17, 17)
+    assert (theme.FLOAT_BUBBLE, theme.FLOAT_STRIP_HEIGHT, theme.BUTTON_HIT) == (49, 34, 20)
+    assert theme.FLOAT_EXPANDED_WIDTH == 157
+    assert (bar.width(), bar.height()) == (49, 49)
+    assert (bar._primary.width(), bar._primary.height()) == (20, 20)
 
 
 def test_disconnected_status_surfaces_auth_and_offline_causes(qt_app: QApplication) -> None:
@@ -121,11 +125,14 @@ def test_control_bar_can_be_dragged_and_right_clicked_to_show_hide_menu(qt_app: 
     assert bar.pos() == QPointF(95, 115).toPoint()
 
     hidden: list[bool] = []
+    hidden: list[bool] = []
     bar.hide_requested.connect(lambda: hidden.append(True))
     bar._show_context_menu(QPointF(100, 120).toPoint())
     assert hidden == []
     assert bar._context_menu is not None
-    bar._context_menu.actions()[0].trigger()
+    actions = bar._context_menu.actions()
+    assert actions[-1].text() == tr("hide_floating_ball")
+    actions[-1].trigger()
     assert hidden == [True]
 
 
@@ -260,23 +267,42 @@ def test_unsupported_exclusion_is_cleared_instead_of_leaving_a_black_mask(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="WDA_EXCLUDEFROMCAPTURE is Windows-only")
-def test_annotation_panel_is_excluded_but_canvas_is_capturable(qt_app: QApplication) -> None:
-    canvas = AnnotationCanvas()
-    panel = AnnotationToolPanel(canvas)
-    canvas.setGeometry(QRect(0, 0, 320, 180))
-    canvas.show()
-    panel.show_for_screen(QRect(0, 0, 800, 600))
-    process_events()
 
-    panel_result = exclude_from_capture(panel)
-    affinity = wintypes.DWORD()
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    user32.GetWindowDisplayAffinity.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
-    user32.GetWindowDisplayAffinity.restype = wintypes.BOOL
-    assert user32.GetWindowDisplayAffinity(
-        wintypes.HWND(int(canvas.winId())), ctypes.byref(affinity)
-    )
-    panel.hide()
-    canvas.hide()
-    assert panel_result.available, panel_result.message
-    assert affinity.value == 0
+def test_context_menu_exposes_open_folder_when_recording_path_exists(qt_app: QApplication) -> None:
+    bar = FloatingControlBar()
+    bar.set_connection(True, "connected")
+    bar.set_recording_output_path(r"C:/recordings/demo.mkv")
+    opened: list[bool] = []
+    bar.open_folder_requested.connect(lambda: opened.append(True))
+    bar._show_context_menu(QPointF(10, 10).toPoint())
+    assert bar._context_menu is not None
+    labels = [action.text() for action in bar._context_menu.actions() if action.text()]
+    assert tr("open_recording_folder") in labels
+    for action in bar._context_menu.actions():
+        if action.text() == tr("open_recording_folder"):
+            action.trigger()
+            break
+    assert opened == [True]
+
+
+def test_context_menu_uses_rounded_menu(qt_app: QApplication) -> None:
+    from obs_floating_controller.floating_bar import RoundedMenu
+
+    bar = FloatingControlBar()
+    bar._show_context_menu(QPointF(10, 10).toPoint())
+    assert isinstance(bar._context_menu, RoundedMenu)
+
+
+def test_display_timer_only_runs_while_recording(qt_app: QApplication) -> None:
+    bar = FloatingControlBar()
+    assert not bar._display_timer.isActive()
+    bar.set_connection(True, "connected")
+    bar.set_record_status(RecordStatus(RecordingState.IDLE, 0))
+    assert not bar._display_timer.isActive()
+    bar.set_record_status(RecordStatus(RecordingState.RECORDING, 1))
+    assert bar._display_timer.isActive()
+    bar.set_connection(False, "offline")
+    assert not bar._display_timer.isActive()
+
+
+
