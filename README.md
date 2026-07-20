@@ -112,6 +112,7 @@ py -3.11 main.py
 ```powershell
 py -3.11 -m pytest -q
 ```
+
 ## 社区与友链
 
 本项目关注开源协作与技术交流，欢迎前往 [LINUX DO 社区](https://linux.do/) 与更多开发者交流、分享经验，并发现有趣的开源项目。
