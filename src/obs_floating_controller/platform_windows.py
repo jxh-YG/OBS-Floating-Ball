@@ -1,4 +1,4 @@
-﻿"""Windows-only integrations: capture exclusion, hotkeys, autostart, single-instance."""
+"""Windows-only integrations: capture exclusion, hotkeys, autostart, single-instance."""
 
 from __future__ import annotations
 
@@ -137,8 +137,6 @@ def hotkey_to_key_sequence(spec: HotkeySpec) -> QKeySequence:
 def exclude_from_capture(widget: QWidget) -> CaptureExclusionResult:
     if os.name != "nt":
         return CaptureExclusionResult(False, "当前系统不是 Windows")
-    if widget.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground):
-        return CaptureExclusionResult(False, "透明悬浮窗模式不支持 Windows 采集排除")
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.SetWindowDisplayAffinity.argtypes = (wintypes.HWND, wintypes.DWORD)
     user32.SetWindowDisplayAffinity.restype = wintypes.BOOL

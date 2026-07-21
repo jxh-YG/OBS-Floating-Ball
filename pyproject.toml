@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "obs-floating-controller"
-version = "0.2.0"
+version = "0.3.0"
 description = "OBS Floating Ball recording controller"
 requires-python = ">=3.11"
 dependencies = [

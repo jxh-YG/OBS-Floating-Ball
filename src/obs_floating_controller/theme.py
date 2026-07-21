@@ -83,14 +83,15 @@ SPACE_LG = 16
 SPACE_XL = 20
 SPACE_XXL = 24
 
-# Component sizes from the supplied HTML reference, scaled to one third.
-FLOAT_HEIGHT = 49
-FLOAT_BUBBLE = 49
+# Floating control dimensions.
+FLOAT_HEIGHT = 56
+FLOAT_BUBBLE = 56
 FLOAT_STRIP_HEIGHT = 34
-FLOAT_STRIP_LEFT = 29
+# No overlap with the ball: strip starts at the ball's right edge.
+FLOAT_STRIP_LEFT = FLOAT_BUBBLE - 10  # tuck under ball; ball paints on top
 FLOAT_STRIP_WIDTH = 128
-FLOAT_EXPANDED_WIDTH = 157
-FLOAT_COLLAPSED_WIDTH = 49
+FLOAT_EXPANDED_WIDTH = FLOAT_STRIP_LEFT + FLOAT_STRIP_WIDTH
+FLOAT_COLLAPSED_WIDTH = 56
 BUTTON_HIT = 20
 CONTROL_DIVIDER_WIDTH = 1
 CONTROL_DIVIDER_HEIGHT = 11
@@ -98,6 +99,7 @@ STATUS_DOT_SIZE = 4
 STATUS_DOT_MARGIN = 5
 SETTINGS_BUTTON_W = 132
 SETTINGS_BUTTON_H = 42
+COMPACT_BUTTON_H = 32
 SETTINGS_WIDTH = 440
 SETTINGS_ROW_HEIGHT = 44
 
@@ -204,6 +206,72 @@ def palette(dark: bool | None = None) -> Palette:
         gray=GRAY,
         is_dark=False,
     )
+
+
+
+def compact_dialog_stylesheet(dark: bool | None = None) -> str:
+    """Slim prompt chrome for rename / short text input."""
+    p = palette(dark)
+    return f"""
+        QDialog#compactDialog {{
+            background: {p.fill_secondary};
+            font-family: '{FONT_FAMILY_PRIMARY}';
+            color: {p.label_primary};
+        }}
+        QLabel#dialogPrompt {{
+            color: {p.label_secondary};
+            font-size: 13px;
+        }}
+        QWidget#dialogFieldWrap {{
+            background: {p.fill_primary};
+            border: 1px solid {p.separator_light};
+            border-radius: {RADIUS_CONTROL}px;
+        }}
+        QLineEdit#dialogField {{
+            min-height: 28px;
+            max-height: 28px;
+            padding: 0 2px;
+            background: transparent;
+            border: 0;
+            color: {p.label_primary};
+            font-size: 14px;
+            selection-background-color: {p.blue_soft};
+        }}
+        QPushButton#saveButton {{
+            min-height: {COMPACT_BUTTON_H}px;
+            max-height: {COMPACT_BUTTON_H}px;
+            padding: 0 14px;
+            background: {p.blue};
+            color: #FFFFFF;
+            border: 0;
+            border-radius: {RADIUS_BUTTON}px;
+            font-size: 13px;
+            font-weight: 600;
+        }}
+        QPushButton#saveButton:hover {{
+            background: {p.blue_hover};
+        }}
+        QPushButton#saveButton:pressed {{
+            background: {p.blue_pressed};
+        }}
+        QPushButton#cancelButton {{
+            min-height: {COMPACT_BUTTON_H}px;
+            max-height: {COMPACT_BUTTON_H}px;
+            padding: 0 14px;
+            background: {p.fill_primary};
+            color: {p.label_primary};
+            border: 1px solid {p.separator};
+            border-radius: {RADIUS_BUTTON}px;
+            font-size: 13px;
+            font-weight: 500;
+        }}
+        QPushButton#cancelButton:hover {{
+            background: {p.fill_tertiary};
+        }}
+        QPushButton#cancelButton:pressed {{
+            background: {p.separator_light};
+        }}
+    """.strip()
 
 
 def dialog_stylesheet(dark: bool | None = None) -> str:

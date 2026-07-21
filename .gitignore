@@ -11,3 +11,4 @@ dist/
 /_*.py
 /_*.txt
 build_log.txt
+build_err.txt

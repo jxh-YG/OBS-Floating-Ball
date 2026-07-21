@@ -8,6 +8,7 @@ import json
 import os
 from ctypes import wintypes
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
@@ -175,13 +176,38 @@ class SettingsStore:
 
     def _load_recent(self) -> tuple[str, ...]:
         raw = self._settings.value("recordings/recent", "[]")
+        items: list[str] = []
         try:
             data = json.loads(str(raw))
             if isinstance(data, list):
-                return tuple(str(item) for item in data if item)[: self.MAX_RECENT]
+                items = [str(item) for item in data if item][: self.MAX_RECENT]
         except json.JSONDecodeError:
-            pass
-        return ()
+            items = []
+        existing = self._existing_recordings(items)
+        if existing != tuple(items):
+            self._persist_recent(existing)
+        return existing
+
+    def _existing_recordings(
+        self,
+        paths: list[str] | tuple[str, ...],
+        *,
+        keep: str | None = None,
+    ) -> tuple[str, ...]:
+        cleaned: list[str] = []
+        for item in paths:
+            if not item or item in cleaned:
+                continue
+            if keep is not None and item == keep:
+                cleaned.append(item)
+                continue
+            if Path(item).is_file():
+                cleaned.append(item)
+        return tuple(cleaned[: self.MAX_RECENT])
+
+    def _persist_recent(self, paths: tuple[str, ...]) -> None:
+        self._settings.setValue("recordings/recent", json.dumps(list(paths)))
+        self._settings.sync()
 
     def load(self) -> ConnectionSettings:
         self._migrate_legacy_settings()
@@ -257,11 +283,15 @@ class SettingsStore:
         )
 
     def remember_recording(self, path: str) -> tuple[str, ...]:
+        path = str(path)
         items = [path, *[item for item in self._load_recent() if item != path]]
-        trimmed = tuple(items[: self.MAX_RECENT])
-        self._settings.setValue("recordings/recent", json.dumps(list(trimmed)))
-        self._settings.sync()
+        trimmed = self._existing_recordings(items, keep=path)
+        self._persist_recent(trimmed)
         return trimmed
+
+    def prune_recent_recordings(self) -> tuple[str, ...]:
+        """Drop missing files from the saved recent list and return survivors."""
+        return self._load_recent()
 
     def save_password(self, password: str, language: str) -> ConnectionSettings:
         current = self.load()

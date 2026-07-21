@@ -37,7 +37,7 @@ class AppleDialog(QDialog):
 
 
 class TextInputDialog(AppleDialog):
-    """Single-line text prompt (rename, etc.)."""
+    """Compact single-line text prompt (rename, etc.)."""
 
     def __init__(
         self,
@@ -49,16 +49,15 @@ class TextInputDialog(AppleDialog):
     ) -> None:
         super().__init__(parent)
         self._language = language
+        self.setObjectName("compactDialog")
         self.setWindowTitle(title)
-        self.setMinimumWidth(360)
+        self.setFixedWidth(300)
+        # Compact chrome: avoid oversized shared dialog button metrics.
+        self.setStyleSheet(theme.compact_dialog_stylesheet())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(theme.SPACE_XXL, theme.SPACE_XL, theme.SPACE_XXL, theme.SPACE_XL)
-        root.setSpacing(theme.SPACE_MD)
-
-        self._title = QLabel(title, self)
-        self._title.setObjectName("dialogTitle")
-        root.addWidget(self._title)
+        root.setContentsMargins(theme.SPACE_LG, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_MD)
+        root.setSpacing(theme.SPACE_SM)
 
         self._prompt = QLabel(prompt, self)
         self._prompt.setObjectName("dialogPrompt")
@@ -68,7 +67,7 @@ class TextInputDialog(AppleDialog):
         field_wrap = QWidget(self)
         field_wrap.setObjectName("dialogFieldWrap")
         field_layout = QVBoxLayout(field_wrap)
-        field_layout.setContentsMargins(theme.SPACE_MD, theme.SPACE_SM, theme.SPACE_MD, theme.SPACE_SM)
+        field_layout.setContentsMargins(theme.SPACE_SM, 4, theme.SPACE_SM, 4)
         field_layout.setSpacing(0)
         self._field = QLineEdit(field_wrap)
         self._field.setObjectName("dialogField")
@@ -95,12 +94,11 @@ class TextInputDialog(AppleDialog):
         root.addLayout(buttons)
 
         self._size_buttons()
-        # Default button already accepts on Enter; avoid double-accept wiring.
 
     def _size_buttons(self) -> None:
         for button in (self._ok, self._cancel):
-            button.setFixedHeight(theme.SETTINGS_BUTTON_H)
-            button.setMinimumWidth(96)
+            button.setFixedHeight(theme.COMPACT_BUTTON_H)
+            button.setMinimumWidth(72)
 
     def value(self) -> str:
         return self._field.text()

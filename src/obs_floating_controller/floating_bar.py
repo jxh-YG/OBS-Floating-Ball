@@ -1,13 +1,15 @@
-﻿"""Glossy Apple-style floating recording control.
+"""Solid Apple-style floating recording control.
 
-Default: collapsed glass ball.
-Click: expand frosted control pill to the right.
+Default: collapsed solid capsule ball.
+Click: expand solid control pill to the right.
+Uses opaque painting so Windows can exclude it from display capture.
 Ball color reflects connection / recording state.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 import time
 from collections.abc import Callable
 
@@ -15,14 +17,15 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, S
 from PySide6.QtGui import (
     QAction,
     QColor,
-    QRegion,
     QFont,
+    QImage,
     QLinearGradient,
     QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
     QRadialGradient,
+    QRegion,
 )
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QMenu, QToolButton, QWidget
 
@@ -38,6 +41,10 @@ class TimerBubble(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setFixedSize(theme.FLOAT_BUBBLE, theme.FLOAT_BUBBLE)
+        # Child transparency is safe: the top-level HWND remains opaque for
+        # capture exclusion, while the circle corners reveal the white parent.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
         self._text = tr("timer_disconnected")
         self._connected = False
         self._recording = False
@@ -114,7 +121,7 @@ class TimerBubble(QWidget):
         ring_grad.setColorAt(0.0, QColor(255, 255, 255, 255))
         ring_grad.setColorAt(0.7, QColor(248, 250, 255, 255))
         ring_grad.setColorAt(1.0, QColor(220, 228, 240, 255))
-        painter.setPen(QPen(QColor(200, 210, 225, 200), max(0.5, scale)))
+        painter.setPen(QPen(QColor(255, 255, 255, 255), max(1.0, 2.5 * scale)))
         painter.setBrush(ring_grad)
         painter.drawEllipse(outer)
 
@@ -181,7 +188,13 @@ class TimerBubble(QWidget):
 
 
 class GlassControlStrip(QFrame):
-    """Frosted white glass pill matching the design reference."""
+    """Frosted-look control pill with antialiased edges."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
 
     def paintEvent(self, _event: object) -> None:
         painter = QPainter(self)
@@ -190,35 +203,42 @@ class GlassControlStrip(QFrame):
         radius = rect.height() / 2.0
         scale = rect.height() / 90.0
 
-        # Soft blue-gray glass body from the reference control bar.
+        # Never paint over the status ball: subtract the ball circle in parent coords.
+        parent = self.parentWidget()
+        clip = QPainterPath()
+        clip.addRect(QRectF(self.rect()))
+        if parent is not None:
+            bubble = parent.findChild(TimerBubble)
+            if bubble is not None:
+                ball = QRectF(bubble.geometry()).translated(-self.x(), -self.y())
+                ball_path = QPainterPath()
+                ball_path.addEllipse(ball)
+                clip = clip.subtracted(ball_path)
+        painter.setClipPath(clip)
+
+        body = QPainterPath()
+        body.addRoundedRect(rect, radius, radius)
+
         fill = QLinearGradient(rect.topLeft(), rect.bottomLeft())
         fill.setColorAt(0.0, QColor("#F7F7FC"))
         fill.setColorAt(0.40, QColor("#E7EAF5"))
         fill.setColorAt(1.0, QColor("#D2DCF0"))
-        painter.setPen(QPen(QColor(255, 255, 255, 170), max(0.5, 2.5 * scale)))
+        painter.setPen(QPen(QColor("#C8D0DE"), max(0.5, 1.0 * scale)))
         painter.setBrush(fill)
-        painter.drawRoundedRect(rect, radius, radius)
+        painter.drawPath(body)
 
-        # Top gloss band
         gloss = QRectF(
-            rect.x() + 15 * scale,
+            rect.x() + 12 * scale,
             rect.y() + 4 * scale,
-            rect.width() - 30 * scale,
+            rect.width() - 28 * scale,
             rect.height() * 0.35,
         )
         gloss_grad = QLinearGradient(gloss.topLeft(), gloss.bottomLeft())
-        gloss_grad.setColorAt(0.0, QColor(255, 255, 255, 210))
-        gloss_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+        gloss_grad.setColorAt(0.0, QColor("#FFFFFF"))
+        gloss_grad.setColorAt(1.0, QColor("#F0F3FA"))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gloss_grad)
         painter.drawRoundedRect(gloss, radius - 1.5, radius - 1.5)
-
-        # Right-end soft blue bloom (as in design)
-        bloom = QRadialGradient(rect.right() - 28 * scale, rect.center().y(), 62 * scale)
-        bloom.setColorAt(0.0, QColor(120, 180, 255, 40))
-        bloom.setColorAt(1.0, QColor(120, 180, 255, 0))
-        painter.setBrush(bloom)
-        painter.drawRoundedRect(rect, radius, radius)
 
 
 class StatusIndicator(QWidget):
@@ -434,6 +454,7 @@ class FloatingControlBar(QWidget):
     close_requested = Signal()
     hide_requested = Signal()
     position_changed = Signal()
+    geometry_changed = Signal()
 
     def __init__(self) -> None:
         super().__init__(None)
@@ -442,7 +463,13 @@ class FloatingControlBar(QWidget):
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # Opaque top-level window so WDA_EXCLUDEFROMCAPTURE can succeed.
+        # Every masked pixel is painted, preventing the native black backing
+        # surface from leaking through the rounded edge.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAutoFillBackground(False)
         self._language = CHINESE
         self._connection_message = tr("not_connected", self._language)
         self._allow_close = False
@@ -454,7 +481,6 @@ class FloatingControlBar(QWidget):
         self._expanded = False
         self._last_recording_output_path: str | None = None
         self._recent_recordings: list[str] = []
-        self._pulse_phase = 0.0
         self._context_menu: QMenu | None = None
         self._record_status = RecordStatus(RecordingState.DISCONNECTED, 0)
         self._status_provider: Callable[[], RecordStatus] | None = None
@@ -483,7 +509,7 @@ class FloatingControlBar(QWidget):
         self._strip.setVisible(False)
 
         controls = QHBoxLayout(self._strip)
-        controls.setContentsMargins(23, 6, 9, 6)
+        controls.setContentsMargins(16, 6, 10, 6)
         controls.setSpacing(7)
         self._primary = self._control_button("play", "start_recording", "primaryButton")
         self._primary.clicked.connect(self._trigger_primary_action)
@@ -529,6 +555,19 @@ class FloatingControlBar(QWidget):
         self._bubble.setCursor(
             Qt.CursorShape.PointingHandCursor if not expanded else Qt.CursorShape.SizeAllCursor
         )
+        self._stack_ball_above_strip()
+        self._apply_smooth_capture_mask()
+        self.update()
+        self.geometry_changed.emit()
+
+    def _stack_ball_above_strip(self) -> None:
+        """Keep the status ball above the control strip so tuck uses ball colors."""
+        if self._expanded:
+            self._strip.lower()
+            self._status_indicator.raise_()
+            for button in self._action_buttons:
+                button.raise_()
+            self._bubble.raise_()
 
     def toggle_collapsed(self) -> None:
         self.set_collapsed(self._expanded)
@@ -580,7 +619,8 @@ class FloatingControlBar(QWidget):
         self._sync_display_timer()
 
     def set_recent_recordings(self, paths: list[str] | tuple[str, ...]) -> None:
-        self._recent_recordings = list(paths)
+        # Only keep files that still exist so the menu never lists dead entries.
+        self._recent_recordings = [path for path in paths if path and Path(path).is_file()]
 
     def set_recording_output_path(self, output_path: str | None) -> None:
         self._last_recording_output_path = output_path
@@ -665,7 +705,6 @@ class FloatingControlBar(QWidget):
 
     def _trigger_primary_action(self) -> None:
         if self._record_status.state is RecordingState.IDLE:
-            self.set_recording_output_path(None)
             self.start_requested.emit()
         elif self._record_status.state is RecordingState.PAUSED:
             self.resume_requested.emit()
@@ -758,6 +797,26 @@ class FloatingControlBar(QWidget):
         open_folder_action.setEnabled(self._last_recording_output_path is not None)
         open_folder_action.triggered.connect(self.open_folder_requested.emit)
         menu.addAction(open_folder_action)
+
+        recent_menu = RoundedMenu(menu)
+        recent_menu.setTitle(tr("recent_recordings", self._language))
+        # Refresh existence when menu opens (files may be deleted while app runs).
+        self._recent_recordings = [path for path in self._recent_recordings if Path(path).is_file()]
+        if self._recent_recordings:
+            for path in self._recent_recordings:
+                label = Path(path).name or path
+                action = QAction(label, recent_menu)
+                action.setToolTip(path)
+                action.triggered.connect(
+                    lambda _checked=False, recording_path=path: self.open_recent_requested.emit(recording_path)
+                )
+                recent_menu.addAction(action)
+        else:
+            empty_action = QAction(tr("recent_empty", self._language), recent_menu)
+            empty_action.setEnabled(False)
+            recent_menu.addAction(empty_action)
+        menu.addMenu(recent_menu)
+
         menu.addSeparator()
         hide_action = QAction(tr("hide_floating_ball", self._language), menu)
         hide_action.triggered.connect(self.hide_requested.emit)
@@ -776,6 +835,129 @@ class FloatingControlBar(QWidget):
             x = bar_rect.left()
             y = bar_rect.bottom() + gap
         menu.popup(QPoint(x, y))
+
+    def _silhouette_path(self) -> QPainterPath:
+        """Outline = status ball (+ control strip when expanded)."""
+        path = QPainterPath()
+        path.setFillRule(Qt.FillRule.WindingFill)
+        bubble = QRectF(self._bubble.geometry())
+        path.addEllipse(bubble)
+        if self._expanded and self._strip.isVisible():
+            strip = QRectF(self._strip.geometry())
+            radius = strip.height() / 2.0
+            strip_path = QPainterPath()
+            strip_path.addRoundedRect(strip, radius, radius)
+            ball_path = QPainterPath()
+            ball_path.addEllipse(bubble)
+            path.addPath(strip_path.subtracted(ball_path))
+        return path
+
+    @staticmethod
+    def _region_from_path_aa(
+        path: QPainterPath,
+        width: int,
+        height: int,
+        *,
+        supersample: int = 4,
+    ) -> QRegion:
+        """Build a binary mask from a supersampled antialiased raster.
+
+        True per-pixel alpha cannot be combined with reliable capture exclusion on Windows,
+        so we keep an opaque HWND + mask, but derive it from a high-res AA shape.
+        """
+        if width <= 0 or height <= 0:
+            return QRegion()
+        scale = max(2, int(supersample))
+        image = QImage(width * scale, height * scale, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.scale(scale, scale)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 255))
+        painter.drawPath(path)
+        painter.end()
+
+        small = image.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        # Convert AA coverage to horizontal runs. A low threshold retains a
+        # one-pixel white fringe instead of exposing a black clipped edge.
+        region = QRegion()
+        alpha_threshold = 24
+        for y in range(height):
+            run_start: int | None = None
+            for x in range(width):
+                visible = QColor.fromRgba(small.pixel(x, y)).alpha() >= alpha_threshold
+                if visible and run_start is None:
+                    run_start = x
+                elif not visible and run_start is not None:
+                    region |= QRegion(run_start, y, x - run_start, 1)
+                    run_start = None
+            if run_start is not None:
+                region |= QRegion(run_start, y, width - run_start, 1)
+        return region
+
+    def paintEvent(self, _event: object) -> None:
+        """Antialiased underlay inside the capture-exclusion mask."""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # The region clips this fill to the silhouette. It guarantees that the
+        # mask fringe is white even where child widgets do not cover a pixel.
+        painter.fillRect(self.rect(), QColor("#F8F9FD"))
+
+        bubble = QRectF(self._bubble.geometry())
+        ring = QRadialGradient(bubble.center().x(), bubble.center().y() - 2, bubble.width() * 0.55)
+        ring.setColorAt(0.0, QColor(255, 255, 255))
+        ring.setColorAt(0.7, QColor(248, 250, 255))
+        ring.setColorAt(1.0, QColor(220, 228, 240))
+        painter.setBrush(ring)
+        painter.drawEllipse(bubble)
+
+        if self._expanded and self._strip.isVisible():
+            strip = QRectF(self._strip.geometry())
+            radius = strip.height() / 2.0
+            strip_path = QPainterPath()
+            strip_path.addRoundedRect(strip, radius, radius)
+            ball_path = QPainterPath()
+            ball_path.addEllipse(bubble)
+            outside_ball = strip_path.subtracted(ball_path)
+            fill = QLinearGradient(strip.topLeft(), strip.bottomLeft())
+            fill.setColorAt(0.0, QColor("#F7F7FC"))
+            fill.setColorAt(0.40, QColor("#E7EAF5"))
+            fill.setColorAt(1.0, QColor("#D2DCF0"))
+            painter.setBrush(fill)
+            painter.drawPath(outside_ball)
+
+    def _apply_smooth_capture_mask(self) -> None:
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        # Supersample more on high-DPI displays.
+        dpr = float(self.devicePixelRatioF() or 1.0)
+        supersample = 4 if dpr <= 1.5 else 6
+        region = self._region_from_path_aa(
+            self._silhouette_path(),
+            self.width(),
+            self.height(),
+            supersample=supersample,
+        )
+        self.setMask(region)
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)
+        self._apply_smooth_capture_mask()
+
+    def showEvent(self, event: object) -> None:
+        super().showEvent(event)
+        self._apply_smooth_capture_mask()
+        self._stack_ball_above_strip()
 
     def closeEvent(self, event: object) -> None:
         if self._allow_close:

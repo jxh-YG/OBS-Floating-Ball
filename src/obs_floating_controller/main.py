@@ -1,4 +1,4 @@
-﻿"""Application composition and process entry point."""
+"""Application composition and process entry point."""
 
 from __future__ import annotations
 
@@ -74,9 +74,10 @@ class ApplicationController(QObject):
         self._settings_store = SettingsStore()
         self._connection_settings = self._settings_store.load()
         self._language = normalize_language(self._connection_settings.language)
-        self._floating_bar_capture_result: CaptureExclusionResult | None = None
         self._visibility = VisibilityState()
         self._auto_hidden_for_recording = False
+        self._last_record_state = RecordingState.DISCONNECTED
+        self._capture_exclusion: CaptureExclusionResult | None = None
         self._client = ObsWebSocketClient(self)
         self._bar = FloatingControlBar()
         self._bar.set_status_provider(lambda: self._client.current_status)
@@ -89,6 +90,8 @@ class ApplicationController(QObject):
         self._auth_prompted = False
         self._rename_retry_remaining = 0
         self._rename_dialog_open = False
+        self._rename_busy_notified = False
+        self._rename_wait_active = False
         self._status_poll = QTimer(self)
         self._status_poll.setInterval(15_000)
         self._status_poll.timeout.connect(self._poll_record_status)
@@ -131,6 +134,7 @@ class ApplicationController(QObject):
         self._bar.close_requested.connect(self._hide_floating_bar)
         self._bar.hide_requested.connect(self._hide_floating_bar)
         self._bar.position_changed.connect(self._save_bar_position)
+        self._bar.geometry_changed.connect(self._on_bar_geometry_changed)
         self._hotkey.activated.connect(self.toggle_floating_bar)
         self._hotkey.start_activated.connect(self._hotkey_start_record)
         self._hotkey.pause_activated.connect(self._hotkey_pause_resume)
@@ -164,7 +168,7 @@ class ApplicationController(QObject):
     def start(self) -> None:
         self._position_floating_bar()
         self._bar.show()
-        QTimer.singleShot(0, self._verify_floating_bar_capture_exclusion)
+        QTimer.singleShot(0, self._apply_capture_exclusion)
         self._register_hotkeys()
         set_autostart_enabled(
             self._connection_settings.autostart,
@@ -189,11 +193,6 @@ class ApplicationController(QObject):
         ):
             logging.warning("one or more hotkeys failed to register")
 
-    def _verify_floating_bar_capture_exclusion(self) -> None:
-        self._floating_bar_capture_result = exclude_from_capture(self._bar)
-        if self._settings_dialog:
-            self._settings_dialog.set_language(self._language)
-
     def _position_floating_bar(self) -> None:
         saved = self._settings_store.load_window_position()
         width = self._bar.width()
@@ -211,7 +210,8 @@ class ApplicationController(QObject):
     def _reclamp_bar_position(self) -> None:
         pos = self._bar.pos()
         x, y = self._clamp_position(pos.x(), pos.y(), self._bar.width(), self._bar.height())
-        self._bar.move(x, y)
+        if x != pos.x() or y != pos.y():
+            self._bar.move(x, y)
         self._save_bar_position()
 
     def _clamp_position(self, x: int, y: int, width: int, height: int) -> tuple[int, int]:
@@ -238,9 +238,34 @@ class ApplicationController(QObject):
         pos = self._bar.pos()
         self._settings_store.save_window_position(pos.x(), pos.y())
 
+    def _on_bar_geometry_changed(self) -> None:
+        self._reclamp_bar_position()
+        # Affinity can need re-apply after size/mask changes on some Windows builds.
+        QTimer.singleShot(0, self._apply_capture_exclusion)
+
+    def _apply_capture_exclusion(self) -> None:
+        if not self._bar.isVisible():
+            return
+        self._capture_exclusion = exclude_from_capture(self._bar)
+        if self._capture_exclusion.available:
+            logging.info("floating bar excluded from display capture")
+        else:
+            logging.info(
+                "floating bar capture exclusion unavailable: %s",
+                self._capture_exclusion.message,
+            )
+        if self._settings_dialog:
+            self._settings_dialog.set_language(self._language)
+
     def _capture_status_text(self, language: str | None = None) -> str:
         active_language = language or self._language
-        return tr("capture_bar_in_display", active_language)
+        result = self._capture_exclusion
+        if result is None:
+            return tr("capture_bar_pending", active_language)
+        if result.available:
+            return tr("capture_bar_excluded", active_language)
+        reason = result.message or tr("unknown_error", active_language)
+        return tr("capture_bar_exclude_failed", active_language, reason=reason)
 
     def show_settings(self) -> None:
         if self._settings_dialog and self._settings_dialog.isVisible():
@@ -301,20 +326,42 @@ class ApplicationController(QObject):
             self._client.refresh_status()
 
     def _on_record_status_changed(self, status: RecordStatus) -> None:
+        previous = self._last_record_state
+        self._last_record_state = status.state
+
+        # Clear finished-state path only when recording actually becomes active.
+        if status.is_active and previous not in {RecordingState.RECORDING, RecordingState.PAUSED}:
+            self._clear_recording_output_path()
+
         self._bar.set_record_status(status)
         self._refresh_tray_icon()
+        self._apply_auto_hide_policy(previous, status)
+
+    def _apply_auto_hide_policy(self, previous: RecordingState, status: RecordStatus) -> None:
         if (
             self._connection_settings.auto_hide_while_recording
+            and previous is not RecordingState.RECORDING
             and status.state is RecordingState.RECORDING
             and self._visibility.visible
         ):
             self._auto_hidden_for_recording = True
             self._hide_floating_bar()
-        elif self._auto_hidden_for_recording and status.state is RecordingState.IDLE:
+            return
+
+        if self._auto_hidden_for_recording and status.state in {
+            RecordingState.IDLE,
+            RecordingState.DISCONNECTED,
+        }:
             self._auto_hidden_for_recording = False
             self._visibility.set_visible(True)
             self._bar.show()
             self._bar.raise_()
+
+    def _clear_recording_output_path(self) -> None:
+        if self._last_recording_output_path is None:
+            return
+        self._last_recording_output_path = None
+        self._bar.set_recording_output_path(None)
 
     def _refresh_tray_icon(self) -> None:
         status = self._client.current_status
@@ -383,19 +430,42 @@ class ApplicationController(QObject):
         if target.is_file():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
             return
-        if target.parent.is_dir():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent)))
-            return
-        self._notify(tr("rename_video_title", self._language), tr("rename_video_missing", self._language))
+        recent = self._settings_store.prune_recent_recordings()
+        self._connection_settings = ConnectionSettings(
+            host=self._connection_settings.host,
+            port=self._connection_settings.port,
+            password=self._connection_settings.password,
+            configured=self._connection_settings.configured,
+            language=self._connection_settings.language,
+            hotkeys=self._connection_settings.hotkeys,
+            autostart=self._connection_settings.autostart,
+            auto_rename_on_stop=self._connection_settings.auto_rename_on_stop,
+            auto_hide_while_recording=self._connection_settings.auto_hide_while_recording,
+            recent_recordings=recent,
+        )
+        self._bar.set_recent_recordings(recent)
+        self._notify(
+            tr("rename_video_title", self._language),
+            tr("rename_video_missing", self._language),
+            informational=True,
+        )
 
     def open_last_recording_folder(self) -> None:
         source = self._last_recording_output_path
         if source is None:
-            self._notify(tr("rename_video_title", self._language), tr("rename_video_unavailable", self._language))
+            self._notify(
+                tr("rename_video_title", self._language),
+                tr("rename_video_unavailable", self._language),
+                informational=True,
+            )
             return
         folder = source if source.is_dir() else source.parent
         if not folder.is_dir():
-            self._notify(tr("rename_video_title", self._language), tr("rename_video_missing", self._language))
+            self._notify(
+                tr("rename_video_title", self._language),
+                tr("rename_video_missing", self._language),
+                informational=True,
+            )
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
@@ -404,20 +474,43 @@ class ApplicationController(QObject):
             return
         source = self._last_recording_output_path
         if source is None:
-            self._notify(tr("rename_video_title", self._language), tr("rename_video_unavailable", self._language))
+            self._notify(
+                tr("rename_video_title", self._language),
+                tr("rename_video_unavailable", self._language),
+                informational=True,
+            )
             return
         if not source.is_file():
             if self._rename_retry_remaining > 0:
                 self._rename_retry_remaining -= 1
-                self._notify(tr("rename_video_title", self._language), tr("rename_video_busy", self._language))
+                if not self._rename_busy_notified:
+                    self._rename_busy_notified = True
+                    self._notify(
+                        tr("rename_video_title", self._language),
+                        tr("rename_video_busy", self._language),
+                        informational=True,
+                    )
                 QTimer.singleShot(500, self.rename_last_recording)
                 return
-            # First miss: allow a few retries for file flush.
-            self._rename_retry_remaining = 6
-            QTimer.singleShot(500, self.rename_last_recording)
+            if not self._rename_wait_active:
+                # First miss: allow a few retries for file flush.
+                self._rename_wait_active = True
+                self._rename_retry_remaining = 6
+                self._rename_busy_notified = False
+                QTimer.singleShot(500, self.rename_last_recording)
+                return
+            self._rename_wait_active = False
+            self._rename_busy_notified = False
+            self._notify(
+                tr("rename_video_title", self._language),
+                tr("rename_video_missing", self._language),
+                informational=True,
+            )
             return
 
         self._rename_retry_remaining = 0
+        self._rename_busy_notified = False
+        self._rename_wait_active = False
         self._rename_dialog_open = True
         try:
             new_name, accepted = prompt_text(
@@ -463,16 +556,31 @@ class ApplicationController(QObject):
         self._last_recording_output_path = target
         self._bar.set_recording_output_path(str(target))
         recent = self._settings_store.remember_recording(str(target))
+        self._connection_settings = ConnectionSettings(
+            host=self._connection_settings.host,
+            port=self._connection_settings.port,
+            password=self._connection_settings.password,
+            configured=self._connection_settings.configured,
+            language=self._connection_settings.language,
+            hotkeys=self._connection_settings.hotkeys,
+            autostart=self._connection_settings.autostart,
+            auto_rename_on_stop=self._connection_settings.auto_rename_on_stop,
+            auto_hide_while_recording=self._connection_settings.auto_hide_while_recording,
+            recent_recordings=recent,
+        )
         self._bar.set_recent_recordings(recent)
-
-
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.toggle_floating_bar()
 
-    def _notify(self, title: str, message: str) -> None:
-        self._tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Warning, 5_000)
+    def _notify(self, title: str, message: str, *, informational: bool = False) -> None:
+        icon = (
+            QSystemTrayIcon.MessageIcon.Information
+            if informational
+            else QSystemTrayIcon.MessageIcon.Warning
+        )
+        self._tray.showMessage(title, message, icon, 5_000)
 
     def quit(self) -> None:
         self._save_bar_position()
